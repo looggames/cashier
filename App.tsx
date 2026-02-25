@@ -124,7 +124,8 @@ const App: React.FC = () => {
     enabled: false
   });
 
-  const [categories, setCategories] = useState(INITIAL_ITEMS);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [isCategoriesLoaded, setIsCategoriesLoaded] = useState(false);
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [customItemForm, setCustomItemForm] = useState({ name: '', price: 0 });
@@ -170,8 +171,6 @@ const App: React.FC = () => {
       fetchData();
       fetchSettings();
       if (userProfile?.role === 'admin') fetchProfiles();
-      const savedCats = localStorage.getItem('laundry_categories');
-      if (savedCats) setCategories(JSON.parse(savedCats));
     }
   }, [session, userProfile]);
 
@@ -325,14 +324,26 @@ const App: React.FC = () => {
       if (pkgsError) throw pkgsError;
       if (pkgsData && pkgsData.length > 0) setSubscriptionPackages(pkgsData);
 
+      console.log("Fetching categories from Supabase...");
       const { data: catsData, error: catsError } = await supabase.from('categories').select('*').order('created_at', { ascending: true });
-      if (catsError) throw catsError;
-      if (catsData && catsData.length > 0) {
-        setCategories(catsData);
+      
+      if (catsError) {
+        console.error("Supabase categories fetch error:", catsError);
+        throw catsError;
+      }
+      
+      const dbCats = catsData || [];
+      console.log(`Successfully fetched ${dbCats.length} categories from database:`, dbCats);
+      
+      // If database has items, use them. If empty, fallback to INITIAL_ITEMS
+      if (dbCats.length > 0) {
+        console.log("Setting categories to database items.");
+        setCategories(dbCats);
       } else {
-        // If no categories in DB, use INITIAL_ITEMS but don't save them automatically to avoid duplicates
+        console.log("Database categories table is empty, using INITIAL_ITEMS as fallback.");
         setCategories(INITIAL_ITEMS);
       }
+      setIsCategoriesLoaded(true);
     } catch (error: any) {
       console.error("Fetch Data Error:", error);
       setDbError(error.message || "فشل الاتصال بقاعدة البيانات");
@@ -424,15 +435,51 @@ const App: React.FC = () => {
   };
 
   const deleteCategory = async (id: string) => {
-    if (!id) return; // Can't delete initial items without ID
-    if (!confirm('هل أنت متأكد من حذف هذا الصنف؟')) return;
+    console.log("--- DELETE CATEGORY START ---");
+    console.log("Target ID:", id);
+    
+    if (!id) {
+      console.error("Critical Error: No ID provided to deleteCategory function.");
+      alert("خطأ: لا يمكن حذف هذا الصنف لأنه لا يملك معرفاً في قاعدة البيانات.");
+      return;
+    }
+    
+    // Removing confirm dialog as it was returning false/cancelled in logs
+    // if (!confirm('هل أنت متأكد من حذف هذا الصنف؟')) {
+    //   console.log("Deletion cancelled by user.");
+    //   return;
+    // }
     
     try {
-      const { error } = await supabase.from('categories').delete().eq('id', id);
-      if (error) throw error;
-      setCategories(prev => prev.filter(c => (c as any).id !== id));
+      console.log(`Executing Supabase delete for id: ${id} ...`);
+      const { error, status, statusText } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', id);
+      
+      console.log("Supabase Response Status:", status, statusText);
+      
+      if (error) {
+        console.error("Supabase delete error details:", error);
+        throw error;
+      }
+      
+      // Check if any row was actually deleted (Supabase delete returns success even if 0 rows matched)
+      // Note: status 204 is typical for successful delete
+      
+      console.log("Delete operation finished. Updating local state...");
+      setCategories(prev => {
+        const newCats = prev.filter(c => (c as any).id !== id);
+        console.log(`State updated. Items remaining: ${newCats.length}`);
+        return newCats;
+      });
+      
+      alert('تم حذف الصنف بنجاح ✅');
     } catch (e: any) {
-      alert(`فشل الحذف: ${e.message}`);
+      console.error("Delete category exception caught:", e);
+      alert(`فشل الحذف: ${e.message || 'خطأ غير معروف'}`);
+    } finally {
+      console.log("--- DELETE CATEGORY END ---");
     }
   };
 
@@ -507,7 +554,16 @@ const App: React.FC = () => {
       
       if (data && data.length > 0) {
         const savedCat = data[0];
-        setCategories(prev => [...prev, savedCat]);
+        setCategories(prev => {
+          // If we are currently showing the fallback INITIAL_ITEMS (which have no IDs), 
+          // replace them entirely with the new database item.
+          const isUsingFallback = prev.length > 0 && !(prev[0] as any).id;
+          if (isUsingFallback) {
+            console.log("Transitioning from fallback items to database items.");
+            return [savedCat];
+          }
+          return [...prev, savedCat];
+        });
         
         // Also add to current order
         setNewOrder(prev => ({
@@ -536,7 +592,6 @@ const App: React.FC = () => {
         console.error("Failed to update price in DB:", e);
       }
     }
-    localStorage.setItem('laundry_categories', JSON.stringify(updated));
   };
 
   const updateItemQuantity = (id: string, delta: number) => {
@@ -1046,27 +1101,47 @@ const App: React.FC = () => {
                 <button onClick={() => setIsEditingPrices(!isEditingPrices)} className={`px-5 py-2 rounded-lg text-xs font-black flex items-center gap-2 transition-all ${isEditingPrices ? 'bg-orange-500 text-white' : 'bg-slate-50 text-slate-600 border'}`}><Settings2 size={14} /> {isEditingPrices ? 'حفظ الأسعار' : 'تعديل الأسعار'}</button>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
-                {categories.map((item, idx) => (
-                  <div key={idx} className="relative group">
-                    <button onClick={() => togglePredefinedItem(item)} className="w-full flex flex-col items-center justify-center p-6 bg-white border border-slate-100 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all active:scale-95 group-button">
-                      <span className="text-3xl mb-3">{item.icon}</span>
-                      <span className="text-sm font-black mb-1">{item.name}</span>
-                      {isEditingPrices ? (
-                        <div className="mt-2 flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center gap-1 bg-orange-50 p-1 rounded-lg border border-orange-200">
-                             <input type="number" className="w-12 bg-transparent text-center font-black text-xs text-orange-700 outline-none" value={item.price} onChange={(e) => updateCategoryPrice(idx, parseFloat(e.target.value) || 0)} />
-                          </div>
-                          {(item as any).id && (
-                            <button onClick={() => deleteCategory((item as any).id)} className="p-1 text-red-500 hover:bg-red-50 rounded-lg transition-all">
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
-                      ) : <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-200">{item.price} ريال</span>}
-                    </button>
+                {!isCategoriesLoaded && categories.length === 0 ? (
+                  <div className="col-span-full flex items-center justify-center py-12">
+                    <Loader2 className="animate-spin text-indigo-600" size={32} />
                   </div>
-                ))}
-                <button onClick={() => setShowCustomItemModal(true)} className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl hover:bg-indigo-50 transition-all active:scale-95"><Plus size={24} className="mb-2"/><span className="text-sm font-black">صنف مخصص</span></button>
+                ) : (
+                  <>
+                    {categories.map((item, idx) => (
+                      <div key={idx} className="relative group">
+                        <div 
+                          onClick={() => !isEditingPrices && togglePredefinedItem(item)} 
+                          className={`w-full flex flex-col items-center justify-center p-6 bg-white border border-slate-100 rounded-3xl transition-all ${!isEditingPrices ? 'hover:bg-indigo-600 hover:text-white cursor-pointer active:scale-95' : ''}`}
+                        >
+                          <span className="text-3xl mb-3">{item.icon}</span>
+                          <span className="text-sm font-black mb-1">{item.name}</span>
+                          {isEditingPrices ? (
+                            <div className="mt-2 flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1 bg-orange-50 p-1 rounded-lg border border-orange-200">
+                                 <input type="number" className="w-12 bg-transparent text-center font-black text-xs text-orange-700 outline-none" value={item.price} onChange={(e) => updateCategoryPrice(idx, parseFloat(e.target.value) || 0)} />
+                              </div>
+                              {(item as any).id && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    deleteCategory((item as any).id);
+                                  }} 
+                                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                  title="حذف"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          ) : <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-200">{item.price} ريال</span>}
+                        </div>
+                      </div>
+                    ))}
+                    <button onClick={() => setShowCustomItemModal(true)} className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl hover:bg-indigo-50 transition-all active:scale-95"><Plus size={24} className="mb-2"/><span className="text-sm font-black">صنف مخصص</span></button>
+                  </>
+                )}
               </div>
             </div>
             <div className="lg:col-span-4 bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 flex flex-col h-full">
