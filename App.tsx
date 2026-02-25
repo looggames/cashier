@@ -324,6 +324,15 @@ const App: React.FC = () => {
       const { data: pkgsData, error: pkgsError } = await supabase.from('subscription_packages').select('*');
       if (pkgsError) throw pkgsError;
       if (pkgsData && pkgsData.length > 0) setSubscriptionPackages(pkgsData);
+
+      const { data: catsData, error: catsError } = await supabase.from('categories').select('*').order('created_at', { ascending: true });
+      if (catsError) throw catsError;
+      if (catsData && catsData.length > 0) {
+        setCategories(catsData);
+      } else {
+        // If no categories in DB, use INITIAL_ITEMS but don't save them automatically to avoid duplicates
+        setCategories(INITIAL_ITEMS);
+      }
     } catch (error: any) {
       console.error("Fetch Data Error:", error);
       setDbError(error.message || "فشل الاتصال بقاعدة البيانات");
@@ -414,6 +423,19 @@ const App: React.FC = () => {
     }
   };
 
+  const deleteCategory = async (id: string) => {
+    if (!id) return; // Can't delete initial items without ID
+    if (!confirm('هل أنت متأكد من حذف هذا الصنف؟')) return;
+    
+    try {
+      const { error } = await supabase.from('categories').delete().eq('id', id);
+      if (error) throw error;
+      setCategories(prev => prev.filter(c => (c as any).id !== id));
+    } catch (e: any) {
+      alert(`فشل الحذف: ${e.message}`);
+    }
+  };
+
   const [newOrder, setNewOrder] = useState<{
     customer_name: string;
     customer_phone: string;
@@ -470,21 +492,50 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddCustomItem = () => {
+  const handleAddCustomItem = async () => {
     if (!customItemForm.name || customItemForm.price <= 0) return alert('يرجى إدخال اسم وسعر صحيح');
-    const id = Math.random().toString(36).substr(2, 9);
-    setNewOrder(prev => ({
-      ...prev,
-      items: [...prev.items, { id, name: customItemForm.name, quantity: 1, price: customItemForm.price }]
-    }));
+    
+    try {
+      const newCat = {
+        name: customItemForm.name,
+        price: customItemForm.price,
+        icon: '✨'
+      };
+      
+      const { data, error } = await supabase.from('categories').insert([newCat]).select();
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        const savedCat = data[0];
+        setCategories(prev => [...prev, savedCat]);
+        
+        // Also add to current order
+        setNewOrder(prev => ({
+          ...prev,
+          items: [...prev.items, { id: savedCat.id, name: savedCat.name, quantity: 1, price: savedCat.price }]
+        }));
+      }
+    } catch (e: any) {
+      alert(`فشل إضافة الصنف: ${e.message}`);
+    }
+    
     setCustomItemForm({ name: '', price: 0 });
     setShowCustomItemModal(false);
   };
 
-  const updateCategoryPrice = (index: number, newPrice: number) => {
+  const updateCategoryPrice = async (index: number, newPrice: number) => {
+    const item = categories[index];
     const updated = [...categories];
     updated[index].price = newPrice;
     setCategories(updated);
+    
+    if ((item as any).id) {
+      try {
+        await supabase.from('categories').update({ price: newPrice }).eq('id', (item as any).id);
+      } catch (e) {
+        console.error("Failed to update price in DB:", e);
+      }
+    }
     localStorage.setItem('laundry_categories', JSON.stringify(updated));
   };
 
@@ -1001,8 +1052,15 @@ const App: React.FC = () => {
                       <span className="text-3xl mb-3">{item.icon}</span>
                       <span className="text-sm font-black mb-1">{item.name}</span>
                       {isEditingPrices ? (
-                        <div className="mt-2 flex items-center gap-1 bg-orange-50 p-1 rounded-lg border border-orange-200" onClick={e => e.stopPropagation()}>
-                           <input type="number" className="w-12 bg-transparent text-center font-black text-xs text-orange-700 outline-none" value={item.price} onChange={(e) => updateCategoryPrice(idx, parseFloat(e.target.value) || 0)} />
+                        <div className="mt-2 flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 bg-orange-50 p-1 rounded-lg border border-orange-200">
+                             <input type="number" className="w-12 bg-transparent text-center font-black text-xs text-orange-700 outline-none" value={item.price} onChange={(e) => updateCategoryPrice(idx, parseFloat(e.target.value) || 0)} />
+                          </div>
+                          {(item as any).id && (
+                            <button onClick={() => deleteCategory((item as any).id)} className="p-1 text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       ) : <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-200">{item.price} ريال</span>}
                     </button>

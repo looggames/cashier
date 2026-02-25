@@ -95,9 +95,19 @@ import { createClient } from '@supabase/supabase-js';
  *   created_at timestamp with time zone default now()
  * );
  * 
+ * -- 7. إنشاء جدول الأصناف (Categories)
+ * create table if not exists categories (
+ *   id uuid default gen_random_uuid() primary key,
+ *   name text not null,
+ *   price float8 not null,
+ *   icon text default '👕',
+ *   created_at timestamp with time zone default now()
+ * );
+ * 
  * -- تعطيل الحماية للجداول الجديدة
  * alter table subscription_packages disable row level security;
  * alter table subscriptions disable row level security;
+ * alter table categories disable row level security;
  */
 
 const supabaseUrl = 'https://hoeealjgmfjbojjyodql.supabase.co';
