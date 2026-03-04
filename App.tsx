@@ -595,16 +595,19 @@ const App: React.FC = () => {
   };
 
   const updateItemQuantity = (id: string, delta: number) => {
-    setNewOrder(prev => ({
-      ...prev,
-      items: prev.items.map(i => {
+    setNewOrder(prev => {
+      const updatedItems = prev.items.map(i => {
         if (i.id === id) {
-          const newQty = Math.max(1, i.quantity + delta);
-          return { ...i, quantity: newQty };
+          return { ...i, quantity: i.quantity + delta };
         }
         return i;
-      })
-    }));
+      }).filter(i => i.quantity > 0);
+      
+      return {
+        ...prev,
+        items: updatedItems
+      };
+    });
   };
 
   const handleCreateOrder = async () => {
@@ -1218,7 +1221,10 @@ const App: React.FC = () => {
               <div className="flex-1 overflow-y-auto max-h-[30vh] space-y-3 mb-6 pr-1 custom-scrollbar">
                 {newOrder.items.map(item => (
                   <div key={item.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border">
-                    <span className="text-sm font-black">{item.name}</span>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-black">{item.name}</span>
+                      <span className="text-[10px] font-bold text-indigo-600">{(item.quantity * item.price).toFixed(2)} ر.س</span>
+                    </div>
                     <div className="flex items-center gap-3">
                       <button onClick={() => updateItemQuantity(item.id, -1)} className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-red-500"><Trash2 size={14} /></button>
                       <span className="text-sm font-black">{item.quantity}</span>
@@ -1305,6 +1311,7 @@ const App: React.FC = () => {
                        <button onClick={(e) => { e.stopPropagation(); handlePrintNewPage(order); }} className="p-3 bg-white border rounded-xl flex items-center justify-center text-slate-500 hover:text-indigo-600 transition-all" title="طباعة"><Printer size={18} className="pointer-events-none" /></button>
                        <button onClick={(e) => { e.stopPropagation(); sendWhatsAppReminder(order, 'READY'); }} className="p-3 bg-white border rounded-xl flex items-center justify-center text-slate-500 hover:text-emerald-600 transition-all" title="واتساب"><Send size={18} className="pointer-events-none" /></button>
                        <button onClick={(e) => { e.stopPropagation(); setShowEditOrderModal(order); }} className="p-3 bg-white border rounded-xl flex items-center justify-center text-slate-500 hover:text-blue-600 transition-all" title="تعديل"><Edit3 size={18} className="pointer-events-none" /></button>
+                       {(userProfile?.role === 'admin' || userProfile?.role === 'manager') && (
                         <button 
                           disabled={deletingOrderId === order.id}
                           onClick={(e) => { 
@@ -1317,6 +1324,7 @@ const App: React.FC = () => {
                         >
                           {deletingOrderId === order.id ? <Loader2 size={18} className="animate-spin pointer-events-none" /> : <Trash2 size={18} className="pointer-events-none" />}
                         </button>
+                       )}
                        <button onClick={(e) => {
                          e.stopPropagation();
                          setNewOrder({
@@ -1782,7 +1790,10 @@ const App: React.FC = () => {
       {showCustomItemModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[200] p-4">
            <div className="bg-white rounded-[3rem] w-full max-w-sm p-8 shadow-2xl animate-in zoom-in-95">
-              <h3 className="text-xl font-black mb-6">صنف مخصص</h3>
+              <div className="flex items-center justify-between mb-6">
+                 <h3 className="text-xl font-black">صنف مخصص</h3>
+                 <button onClick={() => setShowCustomItemModal(false)} className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:text-red-500 transition-all"><X size={20} /></button>
+              </div>
               <input type="text" placeholder="اسم الصنف" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl mb-4 outline-none font-bold" value={customItemForm.name} onChange={e => setCustomItemForm({...customItemForm, name: e.target.value})} />
               <input type="number" placeholder="السعر" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl mb-8 outline-none font-bold" value={customItemForm.price || ''} onChange={e => setCustomItemForm({...customItemForm, price: parseFloat(e.target.value) || 0})} />
               <button onClick={handleAddCustomItem} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black">إضافة للسلة</button>
